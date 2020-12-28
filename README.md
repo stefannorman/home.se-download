@@ -1,6 +1,6 @@
 # Export emails from home.se
 
-My webmail, home.se (Spray), has been neglected far to long.
+My webmail, home.se (Spray), has been neglected far too long.
 You can't change password, use IMAP, etc. 
 
 Downloading your emails is also broken. Hence this python script that exports all emails in a home.se folder into an mbox file.
