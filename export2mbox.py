@@ -32,7 +32,7 @@ def login():
     return res.request._cookies
 
 
-def get_message_ids(cookies, page=1):
+def get_messages(cookies, page=1):
     # max messages to get is 10,000
     msgno = 10000
     res = requests.get(
@@ -40,46 +40,58 @@ def get_message_ids(cookies, page=1):
             SERVER_URL, FOLDER_NAME, page, msgno),
         cookies=cookies,
     )
-    msg_ids = []
-    for msg in res.text.split('{'):
-        message_id = msg[:msg.find('}')]
-        if message_id:
-            msg_ids.append(msg[:msg.find('}')])
-    if len(msg_ids) >= msgno:
-        # call recurseviley if more than 10,000
-        msg_ids += get_message_ids(cookies, page + 1)
-    return msg_ids
+    _messages = []
+    msg_data = res.text.split('{')
+    for msg in msg_data:
+        m = msg.split('_#c|-')
+        if len(m) > 2 and 'Spam!' not in m[0]:
+            _messages.append({
+                'id': m[0].replace('}', ''),
+                'subject': m[1],
+                'date': datetime.strptime(m[2], '%m/%d/%Y %H:%M:%S %p'),
+                'from_name': m[3],
+                'from_email': m[4],
+            })
+    if len(msg_data) >= msgno:
+        # call recursively if more than 10,000
+        _messages += get_messages(cookies, page + 1)
+    return _messages
 
 
 cookies = login()
-# message_ids = get_message_ids(cookies)
-message_ids = ['597C0A55-D9F9-4DAD-B1A7-E8171E883CE0', '0FF29262-A6BD-4507-97DA-750B1C4E7B42']
+messages = get_messages(cookies)
 
-mbox = mailbox.mbox('{}.mbox'.format(FOLDER_NAME))
+# DEBUG
+debug_ids = []
+# debug_ids = ['8F46E068-5DDB-4AC8-AC87-1DE6617FDFF3',
+#             '47162EEA-76C1-496F-9B74-2F6492C20962',
+#             '189EAFD6-FCF3-46C2-8D1F-2C410804A762']
+
+filename = '{}.mbox'.format(FOLDER_NAME)
+mbox = mailbox.mbox(filename)
+
+print('Exporting {} to {}'.format(len(messages), filename))
 
 mbox.lock()
 
-for msg_ID in message_ids:
+for message in messages:
+
+    if len(debug_ids) and message['id'] not in debug_ids:
+        continue
 
     r = requests.get(
         "{}/mail/ms_message.asp?MsgID={}&SM=F&FolderName=/{}".format(
             SERVER_URL,
-            '{' + msg_ID + '}',
+            '{' + message['id'] + '}',
             FOLDER_NAME),
         cookies=cookies,
     )
     soup = BeautifulSoup(r.content, 'html.parser')
-    from_tag = soup.find(id='FromA')
-    from_addr = from_tag['title']
-    from_name = from_tag.text
-
-    subject_tag = soup.find(id='SubjectA')
 
     date_tag = soup.find(id='sDateA')
 
-    msg_date = datetime.strptime(date_tag.text, '%d/%m/%Y %H:%M:%S %p')
-    # Weird datetime bug when
-    msg_date = msg_date + timedelta(hours=8, minutes=59)
+    # Weird datetime bug
+    msg_date = message['date'] + timedelta(hours=8, minutes=59)
 
     msg_body = soup.find(id='QComposerMSB').decode_contents()
     # Remove mysterious ? at the start of body
@@ -114,10 +126,10 @@ for msg_ID in message_ids:
     try:
 
         msg = MIMEMultipart()
-        msg['From'] = '{} <{}>'.format(from_name, from_addr)
+        msg['From'] = '{} <{}>'.format(message['from_name'], message['from_email'])
         msg['To'] = USERNAME
         msg['Date'] = msg_date.strftime("%a, %d %b %Y %H:%M:%S +0100")
-        msg['Subject'] = subject_tag.text
+        msg['Subject'] = message['subject']
 
         body = mailbox.mboxMessage()
         body.set_type('text/html')
@@ -129,7 +141,9 @@ for msg_ID in message_ids:
             url = '{}{}'.format(SERVER_URL, attachment['url'])
             data = requests.get(url).content
             if attachment['name'].lower().endswith(('.jpg', '.jpeg', '.gif', '.png')):
-                part = MIMEImage(data, name=attachment['name'])
+                _filename, _extension = os.path.splitext(attachment['name'].lower())
+                subtype = _extension[1:]
+                part = MIMEImage(data, name=attachment['name'], _subtype=subtype)
                 # Add CID to enable internal img src reference in html mail
                 part.add_header('Content-ID', '<%s>' % attachment['name'])
             else:
@@ -143,7 +157,7 @@ for msg_ID in message_ids:
         mbox.flush()
 
     except TypeError as e:
-        print('Error adding message {}'.format(msg_ID))
+        print('Error adding message {}'.format(message['id']))
         print(e)
 
     finally:
