@@ -63,9 +63,7 @@ messages = get_messages(cookies)
 
 # DEBUG
 debug_ids = []
-# debug_ids = ['8F46E068-5DDB-4AC8-AC87-1DE6617FDFF3',
-#             '47162EEA-76C1-496F-9B74-2F6492C20962',
-#             '189EAFD6-FCF3-46C2-8D1F-2C410804A762']
+# debug_ids = ['B01B91D9-4E49-46B8-8E95-8531BBA50B1E']
 
 filename = '{}.mbox'.format(FOLDER_NAME)
 mbox = mailbox.mbox(filename)
@@ -98,11 +96,7 @@ for message in messages:
     if msg_body.startswith('?'):
         msg_body = msg_body[1:]
 
-    # Attachments are listed in JavaScript in this format:
-    # m_aCAtt[0] =  new CATTACH(0, '1', false, 'image001.png', '44', false, 'location = \'/tools/getFile.asp?GUID=40307d26-8ea5-4881-b67f-54e10cb37617&MsgID=%7B4FD62DD5-CB96-4DD3-9542-6E52604C2F39%7D&name=X*1\'', '/FileCabinet/images/icoIMG.gif');
-    # m_aCAtt[1] =  new CATTACH(1, '2', true, 'image003.jpg', '3', false, 'location = \'/tools/getFile.asp?GUID=40307d26-8ea5-4881-b67f-54e10cb37617&MsgID=%7B4FD62DD5-CB96-4DD3-9542-6E52604C2F39%7D&name=X*2\'', '/FileCabinet/images/icoIMG.gif');
-    # m_aCAtt[2] =  new CATTACH(2, '3', false, 'God Jul och ett Gott Nytt &#197;r_h&#228;lsning.pdf', '201', false, 'location = \'/tools/getFile.asp?GUID=40307d26-8ea5-4881-b67f-54e10cb37617&MsgID=%7B4FD62DD5-CB96-4DD3-9542-6E52604C2F39%7D&name=X*3\'', '/FileCabinet/images/icoPDF.gif');
-
+    # Attachments are listed in JavaScript.
     attachments = []
     for script_tag in soup.findAll('script', {'language': 'Javascript'}):
         if 'CATTACH' in script_tag.decode_contents():
@@ -138,12 +132,14 @@ for message in messages:
 
         # add attachments
         for attachment in attachments:
+            _filename, _extension = os.path.splitext(attachment['name'].lower())
+            if _extension == '.vcf':
+                # Getting VCF contact info is broken, skip it.
+                continue
             url = '{}{}'.format(SERVER_URL, attachment['url'])
             data = requests.get(url).content
             if attachment['name'].lower().endswith(('.jpg', '.jpeg', '.gif', '.png')):
-                _filename, _extension = os.path.splitext(attachment['name'].lower())
-                subtype = _extension[1:]
-                part = MIMEImage(data, name=attachment['name'], _subtype=subtype)
+                part = MIMEImage(data, name=attachment['name'], _subtype=_extension[1:])
                 # Add CID to enable internal img src reference in html mail
                 part.add_header('Content-ID', '<%s>' % attachment['name'])
             else:
