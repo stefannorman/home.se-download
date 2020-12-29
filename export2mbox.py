@@ -1,3 +1,5 @@
+import json
+
 import requests
 import os
 from bs4 import BeautifulSoup
@@ -62,8 +64,9 @@ cookies = login()
 messages = get_messages(cookies)
 
 # DEBUG
+# messages = messages[2700:]
 debug_ids = []
-# debug_ids = ['B01B91D9-4E49-46B8-8E95-8531BBA50B1E']
+# debug_ids = ['0D7DA972-1275-436C-8A99-8DD487C9FEE4']
 
 filename = '{}.mbox'.format(FOLDER_NAME)
 mbox = mailbox.mbox(filename)
@@ -101,14 +104,28 @@ for message in messages:
     for script_tag in soup.findAll('script', {'language': 'Javascript'}):
         if 'CATTACH' in script_tag.decode_contents():
             for line in script_tag.decode_contents().splitlines():
-                line = line.strip().replace('\\', '').replace('\'', '')
+                line = line.strip()
+                # Attachment lines start with something like:
+                # m_aCAtt[0] =  new CATTACH(
                 if line.startswith('m_aCAtt'):
-                    parts = line.split(',')
+
+                    # Remove JS code and construct array
+                    line = re.sub(r'^m_aCAtt\[\d+\] =  new CATTACH\(', '[',
+                                             re.sub(r'\);$', ']', line))
+                    # Fix string to be JSON friendly.
+                    # Tricky, since url can contain single quote and comma
+                    line = line.replace(", '", ", \"").replace("\',", "\",").replace("\']", "\"]")
+                    # # Remove double backslash
+                    line = line.strip().replace('\\', '')
+                    # Load into JSON
+                    line = json.loads(line)
+
                     attachment = {
-                        'name': parts[3].strip(),
-                        'url': parts[6].replace('location = ', '').strip(),
+                        'name': line[3].strip(),
+                        'url': line[6].replace("location = ", "").replace("'", ""),
                     }
-                    # stefan.norman@home.se >> _stefan.norman_home_se/
+                    # Get attachment folder from username.
+                    # I e stefan.norman@home.se >> _stefan.norman_home_se/
                     u_parts = USERNAME.split('@')
                     attach_folder = '_{}_{}/'.format(u_parts[0], u_parts[1].replace('.', '_'))
                     # Change url in body replace folder in img src with a content ID (cid)
