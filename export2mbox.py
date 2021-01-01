@@ -1,15 +1,17 @@
 import json
-
-import requests
-import os
-from bs4 import BeautifulSoup
-import re
 import mailbox
+import os
+import re
+import requests
+
 from datetime import datetime, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.message import MIMEMessage
-from email.mime.image import MIMEImage
 from email.mime.application import MIMEApplication
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import formataddr
+
+from bs4 import BeautifulSoup
 
 LOGIN_URL = "http://idlogin.spray.se/home.se/mail"
 USERNAME = os.getenv('HOME_SE_USERNAME')
@@ -71,7 +73,7 @@ debug_ids = []
 filename = '{}.mbox'.format(FOLDER_NAME)
 mbox = mailbox.mbox(filename)
 
-print('Exporting {} to {}'.format(len(messages), filename))
+print('Exporting {} messages to {}'.format(len(messages), filename))
 
 mbox.lock()
 
@@ -94,7 +96,11 @@ for message in messages:
     # Weird datetime bug
     msg_date = message['date'] + timedelta(hours=8, minutes=59)
 
-    msg_body = soup.find(id='QComposerMSB').decode_contents()
+    msg_body_tag = soup.find(id='QComposerMSB')
+    if msg_body_tag is None:
+        print('Content None of message {}'.format(message['id']))
+        continue
+    msg_body = msg_body_tag.decode_contents()
     # Remove mysterious ? at the start of body
     if msg_body.startswith('?'):
         msg_body = msg_body[1:]
@@ -108,10 +114,9 @@ for message in messages:
                 # Attachment lines start with something like:
                 # m_aCAtt[0] =  new CATTACH(
                 if line.startswith('m_aCAtt'):
-
                     # Remove JS code and construct array
                     line = re.sub(r'^m_aCAtt\[\d+\] =  new CATTACH\(', '[',
-                                             re.sub(r'\);$', ']', line))
+                                  re.sub(r'\);$', ']', line))
                     # Fix string to be JSON friendly.
                     # Tricky, since url can contain single quote and comma
                     line = line.replace(", '", ", \"").replace("\',", "\",").replace("\']", "\"]")
@@ -137,15 +142,14 @@ for message in messages:
     try:
 
         msg = MIMEMultipart()
-        msg['From'] = '{} <{}>'.format(message['from_name'], message['from_email'])
+        msg['Delivered-To'] = USERNAME
+        msg['From'] = formataddr((message['from_name'], message['from_email']))
         msg['To'] = USERNAME
         msg['Date'] = msg_date.strftime("%a, %d %b %Y %H:%M:%S +0100")
         msg['Subject'] = message['subject']
 
-        body = mailbox.mboxMessage()
-        body.set_type('text/html')
-        body.set_payload(msg_body, charset='utf-8')
-        msg.attach(MIMEMessage(body))
+        # add body
+        msg.attach(MIMEText(msg_body, 'html'))
 
         # add attachments
         for attachment in attachments:
@@ -170,6 +174,10 @@ for message in messages:
         mbox.flush()
 
     except TypeError as e:
+        print('Error adding message {}'.format(message['id']))
+        print(e)
+
+    except UnicodeEncodeError as e:
         print('Error adding message {}'.format(message['id']))
         print(e)
 
