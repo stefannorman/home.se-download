@@ -53,8 +53,12 @@ def get_messages(cookies, page=1):
                 'id': m[0].replace('}', ''),
                 'subject': m[1],
                 'date': datetime.strptime(m[2], '%m/%d/%Y %H:%M:%S %p'),
-                'from_name': m[3],
-                'from_email': m[4],
+                'from': formataddr(
+                    (
+                        m[3] if len(m[3]) else USERNAME,
+                        m[4] if len(m[4]) else USERNAME,
+                    )
+                )
             })
     if len(msg_data) >= msgno:
         # call recursively if more than 10,000
@@ -91,7 +95,25 @@ for message in messages:
     )
     soup = BeautifulSoup(r.content, 'html.parser')
 
-    date_tag = soup.find(id='sDateA')
+    to_names = soup.find(id='ToA').text.split(';')
+    message['to'] = []
+
+    to_elem = soup.find(id='QCMsgToEmail')
+    if to_elem is None:
+        print('No to address for message {}'.format(message['id']))
+        continue
+    for idx, val in enumerate(to_elem.attrs['value'].split(';')):
+        try:
+            message['to'].append(formataddr((to_names[idx].strip(), val.strip())))
+        except IndexError as e:
+            print('Error adding message {}'.format(message['id']))
+            print(e)
+            continue
+
+    message['cc'] = []
+    for cc in soup.find(id='QCCcEmail').attrs['value'].split(';'):
+        if cc:
+            message['cc'].append(cc)
 
     # Weird datetime bug
     msg_date = message['date'] + timedelta(hours=8, minutes=59)
@@ -142,9 +164,11 @@ for message in messages:
     try:
 
         msg = MIMEMultipart()
-        msg['Delivered-To'] = USERNAME
-        msg['From'] = formataddr((message['from_name'], message['from_email']))
-        msg['To'] = USERNAME
+        msg['Delivered-To'] = message['to'][0]
+        msg['From'] = message['from']
+        msg['To'] = ", ".join(message['to'])
+        if len(message['cc']):
+            msg['Cc'] = ", ".join(message['cc'])
         msg['Date'] = msg_date.strftime("%a, %d %b %Y %H:%M:%S +0100")
         msg['Subject'] = message['subject']
 
